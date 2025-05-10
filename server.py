@@ -1,4 +1,5 @@
 import websockets
+from websockets.http import Response
 import asyncio
 import ssl
 import json
@@ -273,9 +274,14 @@ async def messaging(websocket):
 async def main():
     def check_path(path, request_headers):
         if path != "/ws":
-            return (404, [], b"Not Found")
-        return None
-    server = await websockets.serve(messaging, "0.0.0.0", PORT, process_request=check_path)
+            # return a proper HTTPResponse object
+            return Response(
+                status=404,
+                headers=[("Content-Type", "text/plain")],
+                body=b"Not Found"
+            )
+        return None  # accept handshake
+    server = await websockets.serve(messaging, "0.0.0.0", PORT, process_request=check_path, ping_interval=30, ping_timeout=10)
     asyncio.create_task(heartbeat())
     print(f"WebSocket server started on wss://0.0.0.0:{PORT}")
     await server.wait_closed()
