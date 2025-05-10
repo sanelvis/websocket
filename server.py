@@ -1,5 +1,5 @@
 import websockets
-from websockets.http import Response
+from websockets.server import Response
 import asyncio
 import ssl
 import json
@@ -274,9 +274,10 @@ async def messaging(websocket):
 async def main():
     def check_path(path, request_headers):
         if path != "/ws":
-            # return a proper HTTPResponse object
+            # return a websockets.server.response
             return Response(
                 status=404,
+                reason_phrase = "Not Found",
                 headers=[("Content-Type", "text/plain")],
                 body=b"Not Found"
             )
