@@ -6,7 +6,7 @@ import hashlib
 import os
 import datetime
 
-PORT = 443
+PORT = int(os.environ.get("PORT", 443))
 connected_clients = set()
 client_to_user = {}
 file_transfer_target = {} 
@@ -271,7 +271,11 @@ async def messaging(websocket):
         await websocket.close()
 
 async def main():
-    server = await websockets.serve(messaging, "0.0.0.0", PORT)
+    def check_path(path, request_headers):
+        if path != "/ws":
+            return (404, [], b"Not Found")
+        return None
+    server = await websockets.serve(messaging, "0.0.0.0", PORT, process_request=check_path)
     asyncio.create_task(heartbeat())
     print(f"WebSocket server started on wss://0.0.0.0:{PORT}")
     await server.wait_closed()
