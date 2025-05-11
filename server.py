@@ -254,6 +254,7 @@ async def messaging(websocket):
                             await websocket.send(json.dumps({"Error": f"User {target_username} is not online."}))
                         else:
                             await target_socket.send(json.dumps({"direct_message": f"{sender}: {chat_message}"}))
+                            log_message(f"{sender} -> {target_username}: {chat_message}", sender)
                         continue  
                     
                     if "file_transfer" in data:
@@ -274,10 +275,14 @@ async def messaging(websocket):
                         if action == "start":
                             file_transfer_target[websocket] = target_socket
                             await target_socket.send(json.dumps({"file_transfer": "start","filename": filename}))
+                            sender = client_to_user.get(websocket)
+                            log_message(f"{sender} started file transfer to {target_username}: {filename}", sender)
                         elif action == "end":
                             end = file_transfer_target.pop(websocket, None)
                             if end:
                                 await end.send(json.dumps({"file_transfer": "end"}))
+                                sender = client_to_user.get(websocket)
+                                log_message(f"{sender} completed file transfer to {target_username}: {filename}", sender)        
                         continue  
                     
                 except json.JSONDecodeError:
