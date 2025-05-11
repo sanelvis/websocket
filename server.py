@@ -50,13 +50,16 @@ def sanitize(message: str) -> str:
     return message.strip().replace("\n","").replace("<","").replace(">","").replace("(","").replace(")","")
 
 async def broadcast_online_users():
-    online_list = list(client_to_user.values())
-    message = json.dumps({"online_users": online_list})
-    for client in connected_clients:
+    for ws in connected_clients:
+        user_list = [
+            uname for client_ws, uname in client_to_user.items()
+            if client_ws is not ws
+        ]
+        msg = json.dumps({"online_users": user_list})
         try:
-            await client.send(message)
+            await ws.send(msg)
         except Exception as e:
-            log_message(f"Error sending online users list: {e}")
+            log_message(f"Error sending online users to {client_to_user.get(ws)}: {e}")
 
 async def heartbeat():
     while True:
