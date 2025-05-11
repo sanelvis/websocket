@@ -27,11 +27,28 @@ user_message_times: dict[str, collections.deque[datetime.datetime]] = {}
 if not os.path.exists(LOG_FOLDER):
     os.makedirs(LOG_FOLDER)
 
-def log_message(message):
-    """Append message to the log file with a timestamp."""
-    with open(LOG_FILE, "a", encoding="utf-8") as log:
-        timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-        log.write(f"{timestamp} {message}\n")
+async def log_to_db(username: str | None, message: str):
+    """
+    Append one row to chat_logs(username, message).
+    If username is None, it’s a system event.
+    """
+    await pool.execute(
+        "INSERT INTO chat_logs(username, message) VALUES($1, $2)",
+        username, message
+    )
+    
+def log_message(message: str, username: str | None = None):
+    """
+    1) Append to the file‐based log
+    2) Schedule an async write into the chat_logs table
+    """
+    # 1) File log
+    ts = datetime.datetime.utcnow().strftime("[%Y-%m-%d %H:%M:%S]")
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{ts} {message}\n")
+
+    # 2) DB log (fire‐and‐forget)
+    asyncio.create_task(log_to_db(username, message))
 
 async def get_password_hash(username: str) -> str | None:
     row = await pool.fetchrow(
@@ -62,7 +79,7 @@ async def broadcast_online_users():
         try:
             await ws.send(msg)
         except Exception as e:
-            log_message(f"Error sending online users to {client_to_user.get(ws)}: {e}")
+            log_message(f"Error sending online users to {client_to_user.get(ws)}: {e}", None)
 
 async def heartbeat():
     while True:
@@ -77,11 +94,11 @@ async def heartbeat():
 
         for client in stale_clients:
             print("Client unresponsive, disconnecting...")
-            log_message("Client unresponsive, disconnecting...")
+            log_message("Client unresponsive, disconnecting...", None)
             connected_clients.discard(client)
             username = client_to_user.pop(client, None)
             if username:
-                log_message(f"User logged out due to heartbeat failure: {username}")
+                log_message(f"User logged out due to heartbeat failure: {username}", username)
             client_state.pop(client, None)
             client_temp.pop(client, None)
             await broadcast_online_users()
@@ -90,7 +107,7 @@ async def heartbeat():
             
 async def messaging(websocket): 
     print("A client connected")
-    log_message("A client connected")
+    log_message("A client connected", None)
     connected_clients.add(websocket)
     try:
         async for message in websocket:
@@ -203,7 +220,7 @@ async def messaging(websocket):
                         login_failure.pop(username, None)
                         client_to_user[websocket] = username
                         await websocket.send(f"Logged in as {username}")
-                        log_message(f"User logged in: {username}")
+                        log_message(f"User logged in: {username}", username)
                         await broadcast_online_users()
                         client_state.pop(websocket, None)
                         client_temp.pop(websocket, None)
@@ -272,12 +289,12 @@ async def messaging(websocket):
 
     except websockets.exceptions.ConnectionClosedError:
         print("Client disconnected unexpectedly.")
-        log_message("Client disconnected unexpectedly.")
+        log_message("Client disconnected unexpectedly.", None)
     finally:
         connected_clients.remove(websocket)
         if websocket in client_to_user:
             username = client_to_user.pop(websocket)
-            log_message(f"User logged out: {username}")
+            log_message(f"User logged out: {username}", username)
             await broadcast_online_users()
         client_state.pop(websocket, None)
         client_temp.pop(websocket, None)
@@ -290,6 +307,14 @@ async def main():
       CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password_hash TEXT NOT NULL
+      )
+    """)
+    await pool.execute("""
+      CREATE TABLE IF NOT EXISTS chat_logs (
+        id SERIAL PRIMARY KEY,
+        ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        username TEXT,
+        message  TEXT NOT NULL
       )
     """)
     server = await websockets.serve(messaging, "0.0.0.0", PORT, ping_interval=30, ping_timeout=10)
