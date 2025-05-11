@@ -248,15 +248,6 @@ async def messaging(websocket):
                     
                 except json.JSONDecodeError:
                     pass
-
-                sender = client_to_user.get(websocket, "Unknown")
-                broadcast_message = f"{sender}: {message}"
-                print(f"Received: {broadcast_message}")
-                log_message(f"Received: {broadcast_message}")
-                for client in connected_clients:
-                    if client != websocket:
-                        await client.send(broadcast_message)
-            
             elif isinstance(message, bytes):
                 target_socket = file_transfer_target.get(websocket)
                 if target_socket:
