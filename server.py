@@ -108,7 +108,7 @@ async def messaging(websocket):
                     elif state == "register_pass":
                         password = message.strip()
                         special_characters = "~`!@#$%^&*-_=+}{[]|,.?"
-                        forbidden_characters = "([\/:;])&'`"
+                        forbidden_characters = r"([\/:;])&'`"
                         if len(password) < 8:
                             await websocket.send("Error: Password must be at least 8 characters long. Enter a new password:")
                             continue
@@ -131,7 +131,7 @@ async def messaging(websocket):
                             await websocket.send("Error: Password must include at least 1 special character. Enter a new password:")
                             continue
                         if any(l in forbidden_characters for l in password):
-                            await websocket.send("Error: Password must not include any forbidden characters ([\"/:;])\&'`: . Enter a new password:")
+                            await websocket.send("Error: Password must not include any forbidden characters ([\"/:;])&'` . Enter a new password:")
                             continue
                         data = client_temp.get(websocket, {})
                         username = data.get("username")
