@@ -5,7 +5,10 @@ import json
 import hashlib
 import os
 import datetime
+import asyncpg
 
+DATABASE_URL = os.environ["postgresql://postgres:jkVgHRekzsKlcBulKkrcblbARVYgpqRf@postgres.railway.internal:5432/railway"]
+pool: asyncpg.Pool
 PORT = int(os.environ.get("PORT", 443))
 connected_clients = set()
 client_to_user = {}
@@ -21,30 +24,27 @@ LOG_FILE = os.path.join(LOG_FOLDER, f"server_chat_log_{datetime.datetime.now().s
 if not os.path.exists(LOG_FOLDER):
     os.makedirs(LOG_FOLDER)
 
-user_file = "user.json"
-
 def log_message(message):
     """Append message to the log file with a timestamp."""
     with open(LOG_FILE, "a", encoding="utf-8") as log:
         timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         log.write(f"{timestamp} {message}\n")
 
-def load_user():
-    if os.path.exists(user_file):
-        with open(user_file, "r", encoding="utf-8") as f:
-            user_data = json.load(f)
-            return user_data
-    print("No user data found.")
-    return {}
+async def get_password_hash(username: str) -> str | None:
+    row = await pool.fetchrow(
+        "SELECT password_hash FROM users WHERE username=$1",
+        username
+    )
+    return row["password_hash"] if row else None
 
-def save_user(user):
-    with open(user_file, "w", encoding="utf-8") as f:
-        json.dump(user, f)
+async def register_user(username: str, password_hash: str):
+    await pool.execute(
+        "INSERT INTO users(username, password_hash) VALUES($1, $2)",
+        username, password_hash
+    )
         
 def hash_pass(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
-
-user = load_user()
 
 def sanitize(message: str) -> str:
     return message.strip().replace("\n","").replace("<","").replace(">","").replace("(","").replace(")","")
@@ -135,18 +135,19 @@ async def messaging(websocket):
                             continue
                         data = client_temp.get(websocket, {})
                         username = data.get("username")
-                        if username is None:
-                            await websocket.send("Error: Blank user.")
-                        elif username in user:
+                        existing = await get_password_hash(username)
+                        if existing is not None:
                             await websocket.send("Error: User already taken.")
                         else:
-                            user[username] = hash_pass(password)
-                            save_user(user)
+                            pw_hash = hash_pass(password)
+                            await register_user(username, pw_hash)
                             await websocket.send("Registration Successful")
-                            log_message(f"User registered: {username}")
-                        client_state.pop(websocket, None)
-                        client_temp.pop(websocket, None)
-                        continue
+                            client_to_user[websocket] = username
+                            await websocket.send(f"Logged in as {username}")
+                            await broadcast_online_users()
+                            client_state.pop(websocket, None)
+                            client_temp.pop(websocket, None)
+                            continue
                     elif state == "login_user":
                         username = message.strip()
                         client_temp[websocket] = {"action": "login", "username": username}
@@ -157,10 +158,11 @@ async def messaging(websocket):
                         if message.strip().upper() == "B":
                             client_state[websocket] = "login_user"
                             await websocket.send("Reenter username:")
-                            continue
+                            continue                    
                         password = message.strip()
                         data = client_temp.get(websocket, {})
                         username = data.get("username")
+                        real_hash = await get_password_hash(username)
                         now = datetime.datetime.now()
                         if username in login_failure:
                             attempts, last_time = login_failure[username]
@@ -172,23 +174,23 @@ async def messaging(websocket):
                                 login_failure[username] = (0,now)
                         else:
                             login_failure[username] = (0,now)
-                        if username is None:
-                            await websocket.send("Error: Blank User.")
-                        elif username not in user or user[username] != hash_pass(password):
+                        if real_hash is None or real_hash != hash_pass(password):
                             attempts, _ = login_failure[username]
                             login_failure[username] = (attempts + 1, now)
                             attempts_left = MAX_FAIL - attempts
-                            await websocket.send(f"Error: Invalid credentials. {attempts_left} attempts left.\n"f"If username is incorrect, type 'B' to re-enter it.")
+                            await websocket.send(
+                                f"Error: Invalid credentials. {attempts_left} attempts left.\n"
+                                "If username is incorrect, type 'B' to re-enter it."
+                            )
                             continue
-                        else:
-                            login_failure.pop(username, None)
-                            client_to_user[websocket] = username
-                            await websocket.send(f"Logged in as {username}")
-                            log_message(f"User logged in: {username}")
-                            await broadcast_online_users()
-                            client_state.pop(websocket, None)
-                            client_temp.pop(websocket, None)
-                            continue
+                        login_failure.pop(username, None)
+                        client_to_user[websocket] = username
+                        await websocket.send(f"Logged in as {username}")
+                        log_message(f"User logged in: {username}")
+                        await broadcast_online_users()
+                        client_state.pop(websocket, None)
+                        client_temp.pop(websocket, None)
+                        continue
                     
                 if websocket not in client_to_user:
                     if message.strip().upper() == "R":
@@ -274,6 +276,14 @@ async def messaging(websocket):
         await websocket.close()
 
 async def main():
+    global pool
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    await pool.execute("""
+      CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL
+      )
+    """)
     server = await websockets.serve(messaging, "0.0.0.0", PORT, ping_interval=30, ping_timeout=10)
     asyncio.create_task(heartbeat())
     print(f"WebSocket server started on wss://0.0.0.0:{PORT}")
