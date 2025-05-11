@@ -105,6 +105,7 @@ async def messaging(websocket):
     print("A client connected")
     log_message("A client connected", None)
     connected_clients.add(websocket)
+    await websocket.send("Enter 'R' to register or 'L' to login:")
     try:
         async for message in websocket:
             key = client_to_user.get(websocket, websocket)
