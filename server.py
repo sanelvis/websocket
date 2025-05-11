@@ -7,8 +7,12 @@ import os
 import datetime
 import asyncpg
 import collections
+import cryptography
+from cryptography.fernet import Fernet
 
 DATABASE_URL = os.environ["DATABASE_URL"]
+FERNET_KEY = os.environ["FERNET_KEY"].encode()
+cipher     = Fernet(FERNET_KEY)
 pool: asyncpg.Pool
 PORT = int(os.environ.get("PORT", 443))
 connected_clients = set()
@@ -28,26 +32,18 @@ if not os.path.exists(LOG_FOLDER):
     os.makedirs(LOG_FOLDER)
 
 async def log_to_db(username: str | None, message: str):
-    """
-    Append one row to chat_logs(username, message).
-    If username is None, it’s a system event.
-    """
+    token = cipher.encrypt(message.encode("utf-8")).decode("utf-8")
     await pool.execute(
         "INSERT INTO chat_logs(username, message) VALUES($1, $2)",
-        username, message
+        username, token
     )
     
 def log_message(message: str, username: str | None = None):
-    """
-    1) Append to the file‐based log
-    2) Schedule an async write into the chat_logs table
-    """
-    # 1) File log
     ts = datetime.datetime.utcnow().strftime("[%Y-%m-%d %H:%M:%S]")
+    token = cipher.encrypt(message.encode("utf-8")).decode("utf-8")
     with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{ts} {message}\n")
+        f.write(f"{ts} {token}\n")
 
-    # 2) DB log (fire‐and‐forget)
     asyncio.create_task(log_to_db(username, message))
 
 async def get_password_hash(username: str) -> str | None:
@@ -116,7 +112,6 @@ async def messaging(websocket):
 
             now = datetime.datetime.utcnow()
             window_start = now - datetime.timedelta(seconds=RATE_LIMIT_TIME)
-            # evict old timestamps
             while dq and dq[0] < window_start:
                 dq.popleft()
 
