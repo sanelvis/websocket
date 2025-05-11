@@ -6,6 +6,7 @@ import hashlib
 import os
 import datetime
 import asyncpg
+import collections
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 pool: asyncpg.Pool
@@ -16,11 +17,13 @@ file_transfer_target = {}
 client_state = {} 
 client_temp = {}
 login_failure = {}
+RATE_LIMIT = 5
+RATE_LIMIT_TIME = 20
 MAX_FAIL = 5
 BLOCK_TIME = 60
 LOG_FOLDER = "serverlogs"
 LOG_FILE = os.path.join(LOG_FOLDER, f"server_chat_log_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-
+user_message_times: dict[str, collections.deque[datetime.datetime]] = {}
 if not os.path.exists(LOG_FOLDER):
     os.makedirs(LOG_FOLDER)
 
@@ -89,7 +92,24 @@ async def messaging(websocket):
     print("A client connected")
     log_message("A client connected")
     connected_clients.add(websocket)
-    
+    async for raw in websocket:
+        if websocket in client_to_user:
+            uname = client_to_user[websocket]
+            dq = user_message_times.setdefault(
+                uname,
+                collections.deque()
+            )
+            now = datetime.datetime.utcnow()
+            window_start = now - datetime.timedelta(seconds=RATE_LIMIT_TIME)
+            while dq and dq[0] < window_start:
+                dq.popleft()
+
+            if len(dq) >= RATE_LIMIT:
+                await websocket.send(
+                    "Error: You are sending messages too quickly. Please slow down."
+                )
+                continue
+            dq.append(now)
     try:
         async for message in websocket:
             if isinstance(message, str):
