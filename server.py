@@ -92,24 +92,6 @@ async def messaging(websocket):
     print("A client connected")
     log_message("A client connected")
     connected_clients.add(websocket)
-    async for raw in websocket:
-        if websocket in client_to_user:
-            uname = client_to_user[websocket]
-            dq = user_message_times.setdefault(
-                uname,
-                collections.deque()
-            )
-            now = datetime.datetime.utcnow()
-            window_start = now - datetime.timedelta(seconds=RATE_LIMIT_TIME)
-            while dq and dq[0] < window_start:
-                dq.popleft()
-
-            if len(dq) >= RATE_LIMIT:
-                await websocket.send(
-                    "Error: You are sending messages too quickly. Please slow down."
-                )
-                continue
-            dq.append(now)
     try:
         async for message in websocket:
             if isinstance(message, str):
