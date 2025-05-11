@@ -7,7 +7,7 @@ import os
 import datetime
 import asyncpg
 
-DATABASE_URL = os.environ["postgresql://postgres:jkVgHRekzsKlcBulKkrcblbARVYgpqRf@postgres.railway.internal:5432/railway"]
+DATABASE_URL = os.environ["DATABASE_URL"]
 pool: asyncpg.Pool
 PORT = int(os.environ.get("PORT", 443))
 connected_clients = set()
