@@ -164,22 +164,25 @@ async def messaging(websocket):
                         username = data.get("username")
                         real_hash = await get_password_hash(username)
                         now = datetime.datetime.now()
+                        if username in login_failure:
+                            attempts, last_time = login_failure[username]
+                            time_passed = (now - last_time).total_seconds()
+                            if attempts >= MAX_FAIL and time_passed < BLOCK_TIME:
+                                await websocket.send("Too many failed login attempts. Try again later.")
+                                continue
+                            elif time_passed >= BLOCK_TIME:
+                                login_failure[username] = (0,now)
+                        else:
+                            login_failure[username] = (0,now)
                         if real_hash is None or real_hash != hash_pass(password):
-                            attempts, _ = login_failure.get(username, (0, datetime.datetime.now()))
-                            login_failure[username] = (attempts + 1, datetime.datetime.now())
+                            attempts, _ = login_failure[username]
+                            login_failure[username] = (attempts + 1, now)
                             attempts_left = MAX_FAIL - attempts
                             await websocket.send(
                                 f"Error: Invalid credentials. {attempts_left} attempts left.\n"
                                 "If username is incorrect, type 'B' to re-enter it."
                             )
                             continue
-                        for client_ws, uname in list(client_to_user.items()):
-                            if uname == username and client_ws is not websocket:
-                                await client_ws.close()
-                                connected_clients.discard(client_ws)
-                                client_to_user.pop(client_ws, None)
-                                log_message(f"Closed previous session for {username}")
-                                break
                         login_failure.pop(username, None)
                         client_to_user[websocket] = username
                         await websocket.send(f"Logged in as {username}")
@@ -188,6 +191,7 @@ async def messaging(websocket):
                         client_state.pop(websocket, None)
                         client_temp.pop(websocket, None)
                         continue
+                    
                 if websocket not in client_to_user:
                     if message.strip().upper() == "R":
                         client_state[websocket] = "register_user"
