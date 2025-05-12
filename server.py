@@ -234,6 +234,18 @@ async def messaging(websocket):
                         continue
                 try:
                     data = json.loads(message)
+                    if data.get("type") == "typing" and data.get("target"):
+                        sender = client_to_user.get(websocket)
+                        for ws2, uname in client_to_user.items():
+                            if uname == data["target"]:
+                                await ws2.send(json.dumps({"typing": sender}))
+                        continue
+                    if data.get("type") == "stop_typing" and data.get("target"):
+                        sender = client_to_user.get(websocket)
+                        for ws2, uname in client_to_user.items():
+                            if uname == data["target"]:
+                                await ws2.send(json.dumps({"stop_typing": sender}))
+                        continue
                     if "target" in data and "message" in data:
                         target_username = data["target"]
                         chat_message = data["message"]
