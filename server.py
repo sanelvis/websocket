@@ -247,6 +247,13 @@ async def messaging(websocket):
                         continue
                 try:
                     data = json.loads(message)
+                    if data.get("type") == "e2ee" and "target" in data:
+                        tgt = data["target"]
+                        for ws2, uname in client_to_user.items():
+                            if uname == tgt:
+                                await ws2.send(json.dumps(data))
+                                break
+                        continue
                     if data.get("type") == "typing" and data.get("target"):
                         sender = client_to_user.get(websocket)
                         for ws2, uname in client_to_user.items():
