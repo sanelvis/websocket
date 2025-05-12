@@ -18,6 +18,7 @@ client_to_user = {}
 file_transfer_target = {} 
 client_state = {} 
 client_temp = {}
+typing_users = {}
 login_failure = {}
 RATE_LIMIT = 5
 RATE_LIMIT_TIME = 20
@@ -28,6 +29,22 @@ LOG_FILE = os.path.join(LOG_FOLDER, f"server_chat_log_{datetime.datetime.now().s
 user_message_times: dict[str, collections.deque[datetime.datetime]] = {}
 if not os.path.exists(LOG_FOLDER):
     os.makedirs(LOG_FOLDER)
+
+async def broadcast_typing_status(sender_ws, is_typing: bool):
+    sender_username = client_to_user.get(sender_ws)
+    if not sender_username:
+        return
+    for client_ws, username in client_to_user.items():
+        if client_ws == sender_ws:
+            continue
+        if is_typing:
+            await client_ws.send(json.dumps({
+                "typing": f"{sender_username} is typing..."
+            }))
+        else:
+            await client_ws.send(json.dumps({
+                "stop_typing": f"{sender_username} has stopped typing."
+            }))
 
 async def log_to_db(username: str | None, message: str):
     token = cipher.encrypt(message.encode("utf-8")).decode("utf-8")
@@ -99,16 +116,28 @@ async def heartbeat():
             await client.close()
 
             
-async def messaging(websocket): 
+async def messaging(websocket):
     print("A client connected")
     log_message("A client connected", None)
     connected_clients.add(websocket)
     await websocket.send("Enter 'R' to register or 'L' to login:")
+
     try:
         async for message in websocket:
             key = client_to_user.get(websocket, websocket)
             dq  = user_message_times.setdefault(key, collections.deque())
-
+            if isinstance(message, str):
+                if message.strip().lower() == "typing":
+                    typing_users[websocket] = client_to_user.get(websocket)
+                    await broadcast_typing_status(websocket, True)
+                    continue
+                elif message.strip().lower() == "stop_typing":
+                    if websocket in typing_users:
+                        del typing_users[websocket]
+                    await broadcast_typing_status(websocket, False)
+                    continue
+                else:
+                    continue
             now = datetime.datetime.utcnow()
             window_start = now - datetime.timedelta(seconds=RATE_LIMIT_TIME)
             while dq and dq[0] < window_start:
@@ -290,6 +319,8 @@ async def messaging(websocket):
         print("Client disconnected unexpectedly.")
         log_message("Client disconnected unexpectedly.", None)
     finally:
+        if websocket in typing_users:
+            del typing_users[websocket]
         connected_clients.remove(websocket)
         if websocket in client_to_user:
             username = client_to_user.pop(websocket)
